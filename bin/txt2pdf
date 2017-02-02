@@ -1,0 +1,143 @@
+#!/usr/bin/perl -w
+
+#   txt2pdf v2013.08.07
+
+#
+# 2012.02.24 Brian Elliott Finley <bfinley@lenovo.com>
+#   - created for use with x-config
+# 2012.05.22 Brian Elliott Finley <bfinley@lenovo.com>
+#   - Mobile office -- Einstein Bros Bagels, Allen, Tx:
+#   - Modify to allow invokation from nautilus
+# 2013.05.30 Brian Elliott Finley <bfinley@lenovo.com>
+#   - Don't eat .cse files alive.  Append a .pdf to the end of them.
+# 2013.08.07 Brian Elliott Finley <bfinley@lenovo.com>
+#   - Don't accept an OUTPUT_FILE as an argument.  Prevents accidental
+#     overwriting of important files.
+#   - Convert to perl
+# 2016.12.01 Brian Elliott Finley <bfinley@lenovo.com>
+#   - Support operation with ".eml" files
+#   - Always append ".pdf" extension to full input file name
+
+#
+# To install on a Linux desktop, do this:
+#
+#   install -m 755 txt2pdf ~/.gnome2/nautilus-scripts/
+#
+#
+# To use, right click on a .txt file in the Nautilus file browser and
+# choose:
+#
+#   "Scripts" -> "txt2pdf"
+#
+
+
+
+########################################################################
+#
+#   Begin MAIN
+#
+
+use strict;
+use File::Basename;
+
+# Debug
+#   Set to "1" to turn on debug, "0" do turn off
+my $debug = 0;
+#$debug = 1;
+
+print "$0 Debug on\n" if($debug);
+
+unless( _which('enscript') ) {
+    my $cmd = q(zenity --info --title "txt2pdf" --text "Please install the enscript tool.");
+    system($cmd);
+    print qq($cmd\n);
+
+    exit 1;
+}
+
+if($debug) {
+    my $file = "/tmp/txt2pdf.debug";
+    open (FILE,">$file") or die ("Couldn't open $file for writing");
+    print FILE "$file\n";
+    print qq(#\n);
+    print qq(# Do a "tail -F $file" in another window while running\n);
+    print qq(#\n);
+}
+
+my @array;
+if(@ARGV) {
+    push @array, @ARGV; # cmd line args override nautilus vars
+
+} elsif( defined $ENV{'NAUTILUS_SCRIPT_SELECTED_FILE_PATHS'} ) {
+    @array = split(/\n/, $ENV{'NAUTILUS_SCRIPT_SELECTED_FILE_PATHS'});
+}
+
+foreach(@array) {
+
+    chomp;
+
+    next unless(m/\.(txt|eml)$/);
+    print "$0 $_\n" if($debug);
+
+    my ($infile, $dir) = fileparse($_);
+    next if($infile =~ m/^autosave_/);
+
+    print FILE "Dir:  $dir\n" if($debug);
+    print "Dir:  $dir\n" if($debug);
+    print FILE "File: $infile\n" if($debug);
+    print "File: $infile\n" if($debug);
+
+    print FILE "chdir $dir\n" if($debug);
+    print "chdir $dir\n" if($debug);
+    chdir $dir;
+
+    my $outfile = $infile . ".pdf";
+
+    my $tmpfile = `mktemp`;
+    chomp $tmpfile;
+
+    my $cmd;
+
+    $cmd = q(enscript -q --header='$n Page $% of $=' -o ) . qq("$tmpfile" "$infile");
+    print FILE "$cmd\n" if($debug);
+    print "$cmd\n" if($debug);
+    !system($cmd) or die("Couldn't run $cmd");
+
+    $cmd = qq(ps2pdf "$tmpfile" "$outfile");
+    print FILE "$cmd\n" if($debug);
+    print "$cmd\n" if($debug);
+    !system($cmd) or die("Couldn't run $cmd");
+
+    unlink $tmpfile unless($debug);
+
+    print FILE "\n" if($debug);
+    print "\n" if($debug);
+}
+
+
+exit 0;
+
+#
+# This is a pure perl which command.
+# 
+#   my $command = _which("rsync");
+#   my $command = _which("rsync", "/usr/bin:/usr/sbin:/bobs/bargin/bin");
+#
+sub _which {
+
+    my $file    = shift;
+    my $path    = shift;
+
+    if(! defined($path)) {
+        $path = $ENV{PATH};
+    }
+
+    foreach my $dir (split(/:/,$path)) {
+        my $binary = "$dir/$file";
+        if(-x $binary) {
+            return $binary;
+        }
+    }
+    return undef;
+}
+

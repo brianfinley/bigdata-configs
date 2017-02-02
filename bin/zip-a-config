@@ -1,0 +1,217 @@
+#!/usr/bin/perl -w
+
+#
+# zip-a-config v1.1
+# 
+#   Zips up a .cse file and all of it's related files in a well
+#   structured package.  It's quick to use and provides a consistent
+#   format and naming scheme for delivery of your configurations.
+#
+#   In addition to all x-config created files, it will also zip up files
+#   with the following naming schemes:
+#
+#     * $config_name.EDITED.xls
+#     * $config_name.DETAILS.*
+#     * $config_name.MES.*
+#
+#
+# To install on a Linux desktop, do this:
+#
+#   install -m 755 zip-a-config ~/.gnome2/nautilus-scripts/
+#
+#
+# To use, right click on a .cse file in the Nautilus file browser and
+# choose:
+#
+#   "Scripts" -> "zip-a-config"
+#
+
+
+# Debug
+#   Set to "1" to turn on debug, "0" do turn off
+my $debug = 0;
+#$debug = 1;
+
+if($debug) {
+    my $file = "/tmp/zip-a-config.debug";
+    open (FILE,">$file") or die ("Couldn't open $file for writing");
+    print FILE "$file\n";
+    print qq(#\n);
+    print qq(# Do a "tail -f $file" in another window while running\n);
+    print qq(#\n);
+}
+
+
+# Test cases to try...
+#$ENV{'NAUTILUS_SCRIPT_SELECTED_FILE_PATHS'} = '/home/bfinley/Big Data/Big Data Distributions and Softwares/MapR/Lenovo Reference Architectures/Configs/CS_MapR-Half_Rack-10Data+Mgt_6TB-v2015.10.01-2.cse';
+
+
+########################################################################
+#
+#   Begin COMMENTS
+#
+#   2011.08.26 Brian Elliott Finley
+#   * Sittin' at a Chili's at the airport in Houston
+#   2011.10.17 Brian Elliott Finley
+#   * Incorporate _Floor_1.cfr files
+#   * Handle commas (,) in .cse file names
+#   2011.10.18 Brian Elliott Finley
+#   * Included .EDITED.xls and .MES.txt files
+#   2011.10.31 Brian Elliott Finley
+#   * Include .DETAILS.txt files
+#   2011.11.10 Brian Elliott Finley
+#   * Auto-convert .txt files to .rtf files
+#   2011.11.10 Brian Elliott Finley
+#   * Include GP_ files (non-cluster configs)
+#   2011.12.19 Brian Elliott Finley
+#   * Include *.MES.rtf files
+#   2011.12.21 Brian Elliott Finley
+#   * Handle _N.cfr files greater than 1
+#   2012.01.26 Brian Elliott Finley
+#   * Improve regex to capture all appropriate .cfr files
+#   2012.02.08 Brian Elliott Finley
+#   * Include copy of self
+#   2013.07.19 Brian Elliott Finley
+#   * Include copy of txt2pdf if it exists
+#   2015.10.07 Brian Elliott Finley
+#   * Escape plus signs in file names
+#   2015.12.22 Brian Elliott Finley
+#   * Include .xml files
+#   2016.08.12 Brian Elliott Finley
+#   * Regex ticks to underscores ['_]
+
+
+########################################################################
+#
+#   Begin MAIN
+#
+
+use strict;
+use File::Basename;
+use File::Copy;
+use File::Path qw(make_path remove_tree);
+
+
+my @array = split(/\n/, $ENV{'NAUTILUS_SCRIPT_SELECTED_FILE_PATHS'});
+foreach(@array) {
+
+    chomp;
+
+    next unless(m/\.(cse|xml)$/);
+
+    my ($file, $dir) = fileparse($_);
+    next if($file =~ m/^autosave_/);
+
+    print FILE "Dir:  $dir\n" if($debug);
+    print FILE "File: $file\n" if($debug);
+
+    print FILE "chdir $dir\n" if($debug);
+    chdir $dir;
+
+    my $regex = $file;
+    $regex =~ s/^FP_//;
+    $regex =~ s/^CS_//;
+    $regex =~ s/^GP_//;
+    $regex =~ s/\.cse$//;
+    $regex =~ s/\.xml$//;
+
+    my $zipfile = $regex . ".zip";
+    my $md5sums = $regex . ".README.md5sums";
+
+    # x-config turns the following characters into underscores for
+    # naming generated files: ,)(
+    $regex =~ s/[,]/[,_]/g;
+    $regex =~ s/[)]/[)_]/g;
+    $regex =~ s/[(]/[(_]/g;
+    $regex =~ s/[+]/\\+/g;  # escape plus signs
+    $regex =~ s/[']/['_]/g;
+
+    $regex = q/.*/ . $regex;
+
+    print FILE "regex: $regex\n" if($debug);
+
+    opendir(my $dh, ".") || die;
+    my @files = readdir($dh);
+    closedir($dh);
+
+    my $cmd;
+    my $file_args;
+    foreach (@files) {
+
+        print FILE "considering file: $_\n" if($debug);
+
+        next if(m/\.zip$/);
+        next if(m/$md5sums/);   # Don't pick up existing md5sum files
+        next if(m/^CS_XCC__/);  # SOVA tmp files.  Don't want 'em, don't need 'em.
+        next if(m/^CS_HVEC__/); # SOVA tmp files.  Don't want 'em, don't need 'em.
+
+        #
+        # Remove autosave files to reduce visual clutter.  And if we do, we
+        # can still go back and get them from /tmp until we reboot...
+        # Note that this is intended to remnove _all_ autosave_* files,
+        # not just the ones that match the selected .cse file.  -BEF-
+        #
+        if(m/^autosave_.*\.cse$/) {
+            move("$_","/tmp/");
+        }
+
+        # But make sure it does match the base solution name, and
+        # appropriate file types.
+        next unless(m/$regex/); 
+
+        if(m/\.txt$/) {
+
+        # Convert txt files to pdf files for the benefit of the OS
+        # challenged (Windows users) # who may need to read these files.
+        # -BEF-
+
+            my $txt2pdf = `which txt2pdf`;
+            chomp $txt2pdf;
+            if( -e $txt2pdf ) {
+                my $cmd3 = qq($txt2pdf "$_");
+                #print "$cmd3\n";
+                system($cmd3);
+
+                my $newfile = $_;
+                $newfile =~ s/\.txt$/.pdf/;
+                $file_args .= qq( "$newfile");
+
+                # And include a copy of txt2pdf...
+                $file_args .= qq( "$txt2pdf");
+            }
+        }
+
+        print FILE "  YES\n" if($debug);
+        $file_args .= qq( "$_");
+
+    }
+
+    #
+    # Get md5sums
+    #
+    my $tmpdir = `mktemp -d`;
+    print FILE "$tmpdir\n" if($debug);
+
+    chomp $tmpdir;
+    my $md5sum_file = "$tmpdir/$md5sums";
+    $cmd = qq(md5sum $file_args > "$md5sum_file");
+    print FILE "$cmd\n" if($debug);
+    unless( !system($cmd) ) { exit 1; }
+
+    #
+    # Lastly, add a copy of __SELF__
+    #
+    $file_args .= qq( "$0" "$md5sum_file");
+
+    #
+    # And add a copy of the md5sums
+    $cmd = qq(zip --junk-paths "$zipfile" $file_args);
+    print FILE "$cmd\n" if($debug);
+    unless( !system($cmd) ) { exit 1; }
+
+    remove_tree($tmpdir);
+
+}
+
+exit 0;
+
